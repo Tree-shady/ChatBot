@@ -9,6 +9,9 @@ public class ApiProviderSettings
     public string BaseUrl { get; set; } = string.Empty;
     public int MaxTokens { get; set; } = 1000;
     public double Temperature { get; set; } = 0.7;
+    public int MaxConversationHistory { get; set; } = 50;
+    public int MaxRetries { get; set; } = 3;
+    public int RetryDelayMs { get; set; } = 1000;
 }
 
 public static class LlmProviders

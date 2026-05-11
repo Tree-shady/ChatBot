@@ -58,30 +58,76 @@ public class HttpChatClient : IChatClient
         _logger.LogDebug("Sending streaming message to HTTP API: {Message}", message);
 
         _conversationHistory.Add(new ChatMessage { Role = "user", Content = message });
+        
+        if (_settings.MaxConversationHistory > 0 && _conversationHistory.Count > _settings.MaxConversationHistory)
+        {
+            _conversationHistory.RemoveRange(0, _conversationHistory.Count - _settings.MaxConversationHistory);
+        }
 
-        var result = await SendMessageStreamInternalAsync(message, cancellationToken);
+        StreamResult result;
+        int retryCount = 0;
+        Exception? lastException = null;
+        
+        do
+        {
+            result = new StreamResult();
+            
+            try
+            {
+                result = await SendMessageStreamInternalAsyncOnceAsync(message, cancellationToken);
+                
+                if (string.IsNullOrEmpty(result.ErrorMessage))
+                {
+                    break;
+                }
+                
+                lastException = new Exception(result.ErrorMessage);
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                _logger.LogWarning("API request failed (attempt {Attempt}/{MaxRetries}): {Error}", 
+                    retryCount + 1, _settings.MaxRetries, ex.Message);
+                
+                if (retryCount < _settings.MaxRetries - 1)
+                {
+                    await Task.Delay(_settings.RetryDelayMs * (retryCount + 1), cancellationToken);
+                }
+            }
+            
+            retryCount++;
+        } while (retryCount < _settings.MaxRetries && !cancellationToken.IsCancellationRequested);
+        
+        if (!string.IsNullOrEmpty(result.ErrorMessage) && result.Chunks.Count == 0)
+        {
+            yield return $"抱歉，调用 API 时出现错误: {lastException?.Message ?? result.ErrorMessage}";
+            _conversationHistory.RemoveAt(_conversationHistory.Count - 1);
+            yield break;
+        }
         
         foreach (var chunk in result.Chunks)
         {
             yield return chunk;
         }
-        
-        if (!string.IsNullOrEmpty(result.ErrorMessage))
-        {
-            yield return result.ErrorMessage;
-        }
     }
 
-    private async Task<StreamResult> SendMessageStreamInternalAsync(string message, CancellationToken cancellationToken)
+    private async Task<StreamResult> SendMessageStreamInternalAsyncOnceAsync(string message, CancellationToken cancellationToken)
     {
         var result = new StreamResult();
         
         try
         {
+            var messages = new List<ChatMessage>();
+            if (!string.IsNullOrEmpty(_settings.SystemPrompt))
+            {
+                messages.Add(new ChatMessage { Role = "system", Content = _settings.SystemPrompt });
+            }
+            messages.AddRange(_conversationHistory);
+            
             var requestBody = new Dictionary<string, object>
             {
                 { "model", string.IsNullOrEmpty(_settings.Model) ? "llama3.2" : _settings.Model },
-                { "messages", _conversationHistory },
+                { "messages", messages },
                 { "max_tokens", _settings.MaxTokens },
                 { "temperature", _settings.Temperature },
                 { "stream", true }
