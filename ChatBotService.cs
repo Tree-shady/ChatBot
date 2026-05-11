@@ -12,6 +12,7 @@ public class ChatBotService : IHostedService
     private readonly ChatBotSettings _settings;
     private Task? _chatTask;
     private CancellationTokenSource? _cts;
+    private const int TypingDelayMs = 30;
 
     public ChatBotService(
         IHostApplicationLifetime lifetime,
@@ -76,8 +77,7 @@ public class ChatBotService : IHostedService
                     break;
                 }
 
-                var response = await _chatClient.SendMessageAsync(input, cancellationToken);
-                Console.WriteLine($"{_settings.BotName}: {response}\n");
+                await SendMessageWithStreamingAsync(input, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -88,5 +88,21 @@ public class ChatBotService : IHostedService
         {
             _logger.LogError(ex, "An error occurred in chat loop.");
         }
+    }
+
+    private async Task SendMessageWithStreamingAsync(string message, CancellationToken cancellationToken)
+    {
+        Console.Write($"{_settings.BotName}: ");
+        
+        await foreach (var chunk in _chatClient.SendMessageStreamAsync(message, cancellationToken))
+        {
+            foreach (var c in chunk)
+            {
+                Console.Write(c);
+                await Task.Delay(TypingDelayMs, cancellationToken);
+            }
+        }
+        
+        Console.WriteLine("\n");
     }
 }

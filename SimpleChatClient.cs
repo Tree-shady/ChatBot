@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -45,7 +46,17 @@ public class SimpleChatClient : IChatClient
 
     public async Task<string> SendMessageAsync(string message, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Received message: {Message}", message);
+        var fullResponse = new StringBuilder();
+        await foreach (var chunk in SendMessageStreamAsync(message, cancellationToken))
+        {
+            fullResponse.Append(chunk);
+        }
+        return fullResponse.ToString();
+    }
+
+    public async IAsyncEnumerable<string> SendMessageStreamAsync(string message, CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug("Received streaming message: {Message}", message);
         _conversationHistory.Add(message);
 
         await Task.Delay(100, cancellationToken);
@@ -53,7 +64,11 @@ public class SimpleChatClient : IChatClient
         var response = GenerateResponse(message);
         _conversationHistory.Add(response);
 
-        return response;
+        foreach (char c in response)
+        {
+            yield return c.ToString();
+            await Task.Delay(20, cancellationToken);
+        }
     }
 
     private string GenerateResponse(string message)

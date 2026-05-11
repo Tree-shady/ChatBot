@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
@@ -116,6 +117,16 @@ public class GeminiChatClient : IChatClient
         {
             _logger.LogError(ex, "Failed to send message to Gemini");
             return $"抱歉，调用 Gemini API 时出现错误: {ex.Message}";
+        }
+    }
+
+    public async IAsyncEnumerable<string> SendMessageStreamAsync(string message, CancellationToken cancellationToken = default)
+    {
+        var response = await SendMessageAsync(message, cancellationToken);
+        foreach (char c in response)
+        {
+            yield return c.ToString();
+            await Task.Delay(20, cancellationToken);
         }
     }
 }

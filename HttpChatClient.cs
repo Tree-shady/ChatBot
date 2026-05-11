@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -44,10 +45,37 @@ public class HttpChatClient : IChatClient
 
     public async Task<string> SendMessageAsync(string message, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Sending message to HTTP API: {Message}", message);
+        var fullResponse = new StringBuilder();
+        await foreach (var chunk in SendMessageStreamAsync(message, cancellationToken))
+        {
+            fullResponse.Append(chunk);
+        }
+        return fullResponse.ToString();
+    }
+
+    public async IAsyncEnumerable<string> SendMessageStreamAsync(string message, CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug("Sending streaming message to HTTP API: {Message}", message);
 
         _conversationHistory.Add(new ChatMessage { Role = "user", Content = message });
 
+        var result = await SendMessageStreamInternalAsync(message, cancellationToken);
+        
+        foreach (var chunk in result.Chunks)
+        {
+            yield return chunk;
+        }
+        
+        if (!string.IsNullOrEmpty(result.ErrorMessage))
+        {
+            yield return result.ErrorMessage;
+        }
+    }
+
+    private async Task<StreamResult> SendMessageStreamInternalAsync(string message, CancellationToken cancellationToken)
+    {
+        var result = new StreamResult();
+        
         try
         {
             var requestBody = new Dictionary<string, object>
@@ -55,41 +83,80 @@ public class HttpChatClient : IChatClient
                 { "model", string.IsNullOrEmpty(_settings.Model) ? "llama3.2" : _settings.Model },
                 { "messages", _conversationHistory },
                 { "max_tokens", _settings.MaxTokens },
-                { "temperature", _settings.Temperature }
+                { "temperature", _settings.Temperature },
+                { "stream", true }
             };
 
-            var response = await _httpClient.PostAsJsonAsync("/v1/chat/completions", requestBody, cancellationToken);
+            using var response = await _httpClient.PostAsJsonAsync("/v1/chat/completions", requestBody, cancellationToken);
             response.EnsureSuccessStatusCode();
 
-            var responseData = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new StreamReader(stream);
+
+            var fullReply = new StringBuilder();
+            string? line;
             
-            string reply = "";
-            if (responseData.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+            while ((line = await reader.ReadLineAsync()) != null && !cancellationToken.IsCancellationRequested)
             {
-                var firstChoice = choices[0];
-                if (firstChoice.TryGetProperty("message", out var msgObj) && 
-                    msgObj.TryGetProperty("content", out var content))
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                if (line.StartsWith("data: "))
                 {
-                    reply = content.GetString() ?? "";
+                    var jsonData = line["data: ".Length..];
+                    
+                    if (jsonData == "[DONE]")
+                        break;
+
+                    try
+                    {
+                        var jsonElement = JsonSerializer.Deserialize<JsonElement>(jsonData);
+                        if (jsonElement.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+                        {
+                            var firstChoice = choices[0];
+                            if (firstChoice.TryGetProperty("delta", out var delta) && 
+                                delta.TryGetProperty("content", out var content))
+                            {
+                                var chunk = content.GetString() ?? "";
+                                if (!string.IsNullOrEmpty(chunk))
+                                {
+                                    fullReply.Append(chunk);
+                                    result.Chunks.Add(chunk);
+                                }
+                            }
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        continue;
+                    }
                 }
             }
 
-            if (string.IsNullOrEmpty(reply))
+            var reply = fullReply.ToString();
+            if (!string.IsNullOrEmpty(reply))
             {
-                reply = "API返回了空响应";
+                _conversationHistory.Add(new ChatMessage { Role = "assistant", Content = reply });
+                _logger.LogDebug("Received complete response from HTTP API: {Reply}", reply);
             }
-
-            _conversationHistory.Add(new ChatMessage { Role = "assistant", Content = reply });
-
-            _logger.LogDebug("Received response from HTTP API: {Reply}", reply);
-
-            return reply;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Streaming request was cancelled");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send message to HTTP API");
-            return $"抱歉，调用 API 时出现错误: {ex.Message}";
+            _logger.LogError(ex, "Failed to send streaming message to HTTP API");
+            result.ErrorMessage = $"抱歉，调用 API 时出现错误: {ex.Message}";
         }
+        
+        return result;
+    }
+
+    private class StreamResult
+    {
+        public List<string> Chunks { get; } = new();
+        public string? ErrorMessage { get; set; }
     }
 }
 
