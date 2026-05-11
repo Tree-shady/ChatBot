@@ -256,4 +256,3 @@ FodyWeavers.xsd
 # Environment variables file
 appsettings.*.json
 appsettings.json
-!appsettings.json
