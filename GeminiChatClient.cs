@@ -60,7 +60,7 @@ public class GeminiChatClient : IChatClient
         try
         {
             var modelId = string.IsNullOrEmpty(_settings.Model) ? "gemini-1.5-flash" : _settings.Model;
-            var url = $"/v1beta/models/{modelId}:generateContent?key={_settings.ApiKey}";
+            var url = $"/v1beta/models/{Uri.EscapeDataString(modelId)}:generateContent?key={Uri.EscapeDataString(_settings.ApiKey)}";
 
             var requestBody = new
             {
@@ -81,7 +81,26 @@ public class GeminiChatClient : IChatClient
             response.EnsureSuccessStatusCode();
 
             var responseData = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-            var reply = responseData.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+            
+            string reply = "";
+            if (responseData.TryGetProperty("candidates", out var candidates) && candidates.GetArrayLength() > 0)
+            {
+                var firstCandidate = candidates[0];
+                if (firstCandidate.TryGetProperty("content", out var content) &&
+                    content.TryGetProperty("parts", out var parts) && parts.GetArrayLength() > 0)
+                {
+                    var firstPart = parts[0];
+                    if (firstPart.TryGetProperty("text", out var text))
+                    {
+                        reply = text.GetString() ?? "";
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(reply))
+            {
+                reply = "API返回了空响应";
+            }
 
             _conversationHistory.Add(new GeminiContent
             {

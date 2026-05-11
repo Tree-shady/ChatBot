@@ -2,6 +2,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<Program>();
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
@@ -13,27 +16,38 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddHttpClient("Gemini");
         services.AddHttpClient("OpenAI");
 
-        var provider = context.Configuration.GetValue<string>("LlmProvider:Provider") ?? "local";
+        var provider = context.Configuration.GetValue<string>("LlmProvider:Provider") ?? "simple";
+        var apiKey = context.Configuration.GetValue<string>("LlmProvider:ApiKey") 
+                     ?? Environment.GetEnvironmentVariable("LLM_API_KEY") 
+                     ?? "";
 
-        switch (provider.ToLower())
+        if (string.IsNullOrEmpty(apiKey))
         {
-            case "openai":
-                services.AddSingleton<IChatClient, OpenAIChatClient>();
-                break;
-            case "anthropic":
-                services.AddSingleton<IChatClient, ClaudeChatClient>();
-                break;
-            case "gemini":
-                services.AddSingleton<IChatClient, GeminiChatClient>();
-                break;
-            case "http":
-            case "local":
-                services.AddHttpClient<HttpChatClient>();
-                services.AddSingleton<IChatClient, HttpChatClient>();
-                break;
-            default:
-                services.AddSingleton<IChatClient, SimpleChatClient>();
-                break;
+            logger.LogWarning("No API key found. Falling back to SimpleChatClient.");
+            services.AddSingleton<IChatClient, SimpleChatClient>();
+        }
+        else
+        {
+            switch (provider.ToLower())
+            {
+                case "openai":
+                    services.AddSingleton<IChatClient, OpenAIChatClient>();
+                    break;
+                case "anthropic":
+                    services.AddSingleton<IChatClient, ClaudeChatClient>();
+                    break;
+                case "gemini":
+                    services.AddSingleton<IChatClient, GeminiChatClient>();
+                    break;
+                case "http":
+                case "local":
+                    services.AddHttpClient<HttpChatClient>();
+                    services.AddSingleton<IChatClient, HttpChatClient>();
+                    break;
+                default:
+                    services.AddSingleton<IChatClient, SimpleChatClient>();
+                    break;
+            }
         }
 
         services.AddHostedService<ChatBotService>();

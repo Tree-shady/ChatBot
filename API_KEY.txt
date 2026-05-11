@@ -1,0 +1,5 @@
+API_URL：https://open.cherryin.net
+
+API_KEY：sk-gxIvauu7Z4LSjZOt3v2zFxF7dlkZCGEaiNcDOfhzP81PnqIn
+
+API_ID：agent/deepseek-v3.2(free)

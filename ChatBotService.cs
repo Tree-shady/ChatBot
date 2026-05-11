@@ -41,15 +41,12 @@ public class ChatBotService : IHostedService
     {
         _logger.LogInformation("Stopping chat bot service...");
 
-        if (_cts != null)
-        {
-            _cts.Cancel();
-        }
-
+        _cts?.Cancel();
         if (_chatTask != null)
         {
             await _chatTask;
         }
+        _cts?.Dispose();
 
         _logger.LogInformation("Chat bot service stopped.");
     }

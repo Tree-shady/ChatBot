@@ -32,6 +32,12 @@ public class HttpChatClient : IChatClient
             _httpClient.BaseAddress = new Uri(_settings.BaseUrl);
         }
 
+        if (!string.IsNullOrEmpty(_settings.ApiKey))
+        {
+            _httpClient.DefaultRequestHeaders.Authorization = 
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.ApiKey);
+        }
+
         _logger.LogInformation("HTTP chat client initialized with base URL: {BaseUrl}", _settings.BaseUrl);
         return Task.CompletedTask;
     }
@@ -56,7 +62,22 @@ public class HttpChatClient : IChatClient
             response.EnsureSuccessStatusCode();
 
             var responseData = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-            var reply = responseData.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+            
+            string reply = "";
+            if (responseData.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+            {
+                var firstChoice = choices[0];
+                if (firstChoice.TryGetProperty("message", out var msgObj) && 
+                    msgObj.TryGetProperty("content", out var content))
+                {
+                    reply = content.GetString() ?? "";
+                }
+            }
+
+            if (string.IsNullOrEmpty(reply))
+            {
+                reply = "API返回了空响应";
+            }
 
             _conversationHistory.Add(new ChatMessage { Role = "assistant", Content = reply });
 

@@ -22,8 +22,6 @@ public class ClaudeChatClient : IChatClient
         _logger = logger;
         _settings = settings.Value;
         _httpClient = httpClientFactory.CreateClient("Claude");
-        _httpClient.DefaultRequestHeaders.Add("x-api-key", _settings.ApiKey);
-        _httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
     }
 
     public Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -39,6 +37,10 @@ public class ClaudeChatClient : IChatClient
         {
             _httpClient.BaseAddress = new Uri("https://api.anthropic.com");
         }
+
+        _httpClient.DefaultRequestHeaders.Clear();
+        _httpClient.DefaultRequestHeaders.Add("x-api-key", _settings.ApiKey);
+        _httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
 
         _logger.LogInformation("Claude chat client initialized.");
         return Task.CompletedTask;
@@ -65,7 +67,21 @@ public class ClaudeChatClient : IChatClient
             response.EnsureSuccessStatusCode();
 
             var responseData = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-            var reply = responseData.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
+            
+            string reply = "";
+            if (responseData.TryGetProperty("content", out var content) && content.GetArrayLength() > 0)
+            {
+                var firstContent = content[0];
+                if (firstContent.TryGetProperty("text", out var text))
+                {
+                    reply = text.GetString() ?? "";
+                }
+            }
+
+            if (string.IsNullOrEmpty(reply))
+            {
+                reply = "API返回了空响应";
+            }
 
             _conversationHistory.Add(new ClaudeMessage { Role = "assistant", Content = reply });
 

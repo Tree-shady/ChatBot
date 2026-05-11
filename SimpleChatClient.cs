@@ -5,6 +5,25 @@ namespace ChatBot;
 
 public class SimpleChatClient : IChatClient
 {
+    private static readonly Random _random = new Random();
+    private static readonly Dictionary<string, string> _responses = new Dictionary<string, string>
+    {
+        { "你好", "你好！" },
+        { "hello", "Hello!" },
+        { "时间", "现在是 " },
+        { "日期", "今天是 " },
+        { "帮助", "你可以和我聊天，或者说 'exit' 来退出。" },
+        { "再见", "再见！期待下次和你聊天！" }
+    };
+    private static readonly string[] _defaultResponses =
+    {
+        "收到你的消息了：'{0}'",
+        "这是一个有趣的话题！",
+        "让我想想...",
+        "我理解了，你在说'{0}'。",
+        "好的，我记下了。"
+    };
+
     private readonly ILogger<SimpleChatClient> _logger;
     private readonly ChatBotSettings _settings;
     private readonly List<string> _conversationHistory = new();
@@ -41,33 +60,31 @@ public class SimpleChatClient : IChatClient
     {
         var lowerMessage = message.ToLowerInvariant();
 
-        var responses = new Dictionary<string, string>
-        {
-            { "你好", $"你好！我是{_settings.BotName}。" },
-            { "hello", $"Hello! I'm {_settings.BotName}." },
-            { "时间", $"现在是 {DateTime.Now:yyyy年MM月dd日 HH:mm:ss}" },
-            { "日期", $"今天是 {DateTime.Now:yyyy年MM月dd日}" },
-            { "帮助", "你可以和我聊天，或者说 'exit' 来退出。" },
-            { "再见", "再见！期待下次和你聊天！" }
-        };
-
-        foreach (var (keyword, response) in responses)
+        foreach (var (keyword, response) in _responses)
         {
             if (lowerMessage.Contains(keyword))
             {
+                if (keyword == "你好")
+                {
+                    return $"你好！我是{_settings.BotName}。";
+                }
+                if (keyword == "hello")
+                {
+                    return $"Hello! I'm {_settings.BotName}.";
+                }
+                if (keyword == "时间")
+                {
+                    return $"{response}{DateTime.Now:yyyy年MM月dd日 HH:mm:ss}";
+                }
+                if (keyword == "日期")
+                {
+                    return $"{response}{DateTime.Now:yyyy年MM月dd日}";
+                }
                 return response;
             }
         }
 
-        var defaultResponses = new[]
-        {
-            $"收到你的消息了：'{message}'",
-            "这是一个有趣的话题！",
-            "让我想想...",
-            $"我理解了，你在说'{message}'。",
-            "好的，我记下了。"
-        };
-
-        return defaultResponses[new Random().Next(defaultResponses.Length)];
+        var template = _defaultResponses[_random.Next(_defaultResponses.Length)];
+        return string.Format(template, message);
     }
 }
